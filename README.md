@@ -67,8 +67,10 @@ docker compose down -v --remove-orphans
 - 五个候选特征为配方固形物、投料与标称厚度之比、首尾真空点的分钟差、真空段压力和板温的采集点算术平均。同配方下恒定列自动排除。对有变化的列应用 Yeo–Johnson 并标准化，拟合 `Ridge(alpha=0.65, solver='svd')`。逐批留一时在每折重新拟合变换，验证误差以百分点计。固定复现标识 1062，SVD 求解过程没有随机采样。实测误差和预测保留六位小数，变换参数与回归系数保留十位小数。快照和模型结果保存在数据库与 `/evidence/fit-<id>.json`。
 - 窗内预测仍需独立试片复测。预测超窗或复测超窗都会将这次校准留置。复测达窗且预测达窗时主管可签发。物理证据不足返回 HTTP 409 并记操作者、拒绝原因和时间。
 - Redis 唤醒队列以已提交的 MySQL 校准记录为准，短暂滞留会由 worker 扫描回收。错误单可用原快照重试。数据库批次行锁串行化曲线、测量、复测和签发写入。
+- 拟合证据文件是台账结论的落盘副本，不独立产生结论。台账未落定（排队、计算中、计算失败）时卷上的文件按游离文件处理，不能当证据；已落定单缺文件、缺输入指纹或指纹、结论对不上时，校准页面标为「待核」，预测与复测不显示为可用。
+- worker 中断恢复只补齐证据：已落定单用校准单冻结的原输入快照与台账结论原子重建 `/evidence/fit-<id>.json`，不再重新拟合。补证据与试算并发时，`attempts` 与状态守卫保证较早一次迟到试算不会盖掉已确认的文件。主管可在校准页面按原输入与结论补证据（`POST /calibrations/{id}/evidence/backfill`），已签发结论照旧不变。
 
-`backend/src/models.py` 与 `backend/migrations/initial.py` 定义初始数据库。`schemas.py` 是入参协议，`ledger.py` 是领域状态和工况提取，`routes.py` 暴露读写接口。`calculation.py` 与 `worker.py` 分离计算和队列提交。`frontend/src/api.js` 管理 API 和会话状态，`pages/` 实现四个页面，`components/` 保存共用状态标示、工艺窗和曲线。
+`backend/src/models.py` 与 `backend/migrations/initial.py` 定义初始数据库。`schemas.py` 是入参协议，`ledger.py` 是领域状态和工况提取，`routes.py` 暴露读写接口。`calculation.py` 与 `worker.py` 分离计算和队列提交，`evidence.py` 负责证据卷与台账的对账、主管补证据和中断恢复。`frontend/src/api.js` 管理 API 和会话状态，`pages/` 实现四个页面，`components/` 保存共用状态标示、工艺窗和曲线。
 
 前端改动可通过 `docker compose up -d --build frontend` 重建。后端本地开发可装 `backend/requirements.txt`，设置 `DB_HOST`、`DB_PORT`、`REDIS_URL` 和数据库凭据，再从 `backend/` 运行 `python -m migrations.initial`、`python -m scripts.seed_demo`、`uvicorn src.app:app --reload`。直接运行 worker 时需提供可写的 `/evidence`，完整联调可用 Compose。
 

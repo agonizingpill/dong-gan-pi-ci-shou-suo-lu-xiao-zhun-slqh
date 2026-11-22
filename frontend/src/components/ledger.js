@@ -1,7 +1,12 @@
-import {h, number, roles, states} from '../presentation.js';
+import {evidenceStates, h, number, roles, states} from '../presentation.js';
 
 export const brand = `<span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
   <span>北屿果研<small>冻干计量台</small></span>`;
+
+export function evidenceBadge(evidence) {
+  if (!evidence) return '';
+  return `<span class="evidence-badge" data-evidence="${h(evidence.status)}"><i></i>${h(evidenceStates[evidence.status] || evidence.status)}</span>`;
+}
 
 export function shell(active, user, body) {
   const links = [['batches', '批次与曲线'], ['lab', '收缩率试算'], ['release', '放行台账']];

@@ -1,4 +1,3 @@
-import json
 import logging
 import time
 from datetime import timedelta
@@ -9,12 +8,14 @@ from sqlalchemy import or_, select
 
 from .calculation import estimate
 from .db import QUEUE, Session, redis, utcnow
+from . import evidence
 from .ledger import checksum, inside, record
 from .models import BatchState, CalibrationRelease, ChamberRun, DryBatch, ReleaseState
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 HEARTBEAT = Path('/tmp/worker-heartbeat')
+RECOVERY_INTERVAL_SECONDS = 30
 
 
 def claim(wakeup_id):
@@ -39,7 +40,10 @@ def settle(job, result, error):
     with Session.begin() as db:
         batch = db.scalar(select(DryBatch).where(DryBatch.code == snapshot['batch']).with_for_update())
         entry = db.get(CalibrationRelease, release_id, with_for_update=True)
+        # 版本守卫：补证据或较早一次迟到的试算先落定时，过期尝试不得盖掉已确认的文件与结论
         if entry.attempts != attempt or entry.state != ReleaseState.RUNNING:
+            log.info('calibration %s stale attempt %s skipped, current state %s',
+                     release_id, attempt, entry.state.value)
             return
         entry.touched_at = utcnow()
         if error is not None:
@@ -47,23 +51,30 @@ def settle(job, result, error):
             entry.error = error[:240]
             record(db, 'worker', 'fit.failed', entry.error, batch.code)
             return
-        evidence = Path(f'/evidence/fit-{release_id}.json')
-        temp = evidence.with_suffix(f'.{attempt}.tmp')
-        try:
-            payload = {'input_hash': digest, 'snapshot': snapshot, 'result': result}
-            temp.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
-            temp.replace(evidence)
-        finally:
-            temp.unlink(missing_ok=True)
         entry.result = result
         entry.prediction_pct = result['prediction_pct']
         within_window = inside(entry.prediction_pct, snapshot['window'])
         entry.state = ReleaseState.AWAITING if within_window else ReleaseState.RETEST
+        # 证据文件按原输入与本次结论原子落盘；卷不可写时本次试算回退为失败，可按原快照重试
+        try:
+            verification = evidence.write_evidence(
+                release_id, digest, snapshot, result, actor='worker',
+                action='fit.evidence', batch_code=batch.code)
+        except OSError:
+            entry.state = ReleaseState.FAILED
+            entry.error = '证据卷暂不可写，可按原快照重试'
+            entry.result = None
+            entry.prediction_pct = None
+            record(db, 'worker', 'fit.failed', entry.error, batch.code)
+            log.exception('calibration evidence could not be written')
+            return
+        entry.error = None
         batch.state = BatchState.REVIEW
         run = db.get(ChamberRun, entry.run_id)
         record(db, 'worker', 'fit.completed' if within_window else 'retest.opened',
-               f'{run.source_name} · {entry.prediction_pct:.3f}% · 工艺窗 {snapshot["window"]}', batch.code)
-        log.info('calibration %s %s', release_id, entry.state.value)
+               f'{run.source_name} · {entry.prediction_pct:.3f}% · 工艺窗 {snapshot["window"]} · 证据 {verification["label"]}',
+               batch.code)
+        log.info('calibration %s %s evidence=%s', release_id, entry.state.value, verification['status'])
 
 
 def process(job):
@@ -74,16 +85,22 @@ def process(job):
         result = estimate(snapshot)
     except Exception as exc:
         log.exception('calibration fit failed')
-        settle(job, None, str(exc))
+        settle(job, None, str(exc)[:240] or '拟合计算失败，可按原快照重试')
     else:
-        try:
-            settle(job, result, None)
-        except OSError:
-            log.exception('calibration evidence could not be written')
-            settle(job, None, '证据卷暂不可写，可按原快照重试')
+        settle(job, result, None)
+
+
+def recover_interrupted():
+    """试算中断恢复：台账已落定而证据卷缺失/不一致的单据，只用原输入与结论补齐，不再拟合。"""
+    recovered = evidence.recover_pending_evidence()
+    if recovered:
+        log.info('recovered evidence without refitting: %s', recovered)
+    return recovered
 
 
 def main():
+    last_recovery = 0.0
+    recover_interrupted()
     while True:
         try:
             try:
@@ -96,6 +113,9 @@ def main():
             job = job or claim(None)
             if job:
                 process(job)
+            if time.monotonic() - last_recovery > RECOVERY_INTERVAL_SECONDS:
+                recover_interrupted()
+                last_recovery = time.monotonic()
             HEARTBEAT.touch()
         except Exception:
             log.exception('worker iteration failed')

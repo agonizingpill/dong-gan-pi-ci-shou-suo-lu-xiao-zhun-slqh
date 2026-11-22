@@ -6,9 +6,13 @@ export const states = {
   draft: '待冻结', frozen: '已冻结', queued: '已排队', running: '计算中', failed: '计算失败',
   awaiting_verification: '待复测确认', retest_required: '超窗待复测', verified: '待签发', held: '留置',
 };
+export const evidenceStates = {
+  available: '证据可用', pending_verification: '待核', unsettled: '未落定',
+};
 export const events = {
   'batch.register': '登记批次', 'curve.import': '采集曲线', 'curve.freeze': '冻结曲线', 'sample.record': '登记测量',
   'fit.queue': '提交试算', 'fit.retry': '重试试算', 'fit.failed': '计算失败', 'fit.completed': '试算完成',
+  'fit.evidence': '证据落盘', 'evidence.backfill': '主管补证据', 'evidence.recovered': '中断恢复补证据',
   'retest.opened': '创建超窗复测单', 'retest.verified': '复测确认', 'retest.held': '复测留置',
   'release.sign': '主管签发', 'reference.archive': '认证参考批次',
 };

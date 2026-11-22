@@ -40,6 +40,7 @@ export const api = {
   archive: (code, data) => request(`${batchPath(code)}/archive`, 'POST', data),
   fit: code => request(`${batchPath(code)}/calibration`, 'POST'),
   retry: id => request(`${fitPath(id)}/retry`, 'POST'),
+  backfillEvidence: id => request(`${fitPath(id)}/evidence/backfill`, 'POST'),
   retest: (id, data) => request(`${fitPath(id)}/retest`, 'POST', data),
   release: (id, data) => request(`${fitPath(id)}/release`, 'POST', data),
 };

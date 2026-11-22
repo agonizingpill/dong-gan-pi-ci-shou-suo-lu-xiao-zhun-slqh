@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import ledger
+from . import evidence, ledger
 from .auth import identity, issue, require, valid_password
 from .db import session
 from .models import CalibrationRelease, ChamberRun, DryBatch, LabEvent, RecipeLot, Role, User
@@ -107,7 +107,9 @@ def batch_detail(code: str, db: Session = Depends(session)):
         readiness = str(exc)
     return {'batch': ledger.row(batch), 'recipe': ledger.row(db.get(RecipeLot, batch.recipe_code)),
             'runs': [ledger.row(run) for run in runs], 'samples': [ledger.row(sample) for sample in samples],
-            'calibration': ledger.row(entry) if entry else None, 'readiness_issue': readiness}
+            'calibration': ledger.row(entry) if entry else None,
+            'evidence': evidence.inspect_evidence(entry) if entry else None,
+            'readiness_issue': readiness}
 
 
 @router.post('/batches/{code}/curves', status_code=201)
@@ -158,7 +160,8 @@ def register(db: Session = Depends(session)):
     rows = db.execute(select(CalibrationRelease, ChamberRun).join(ChamberRun)
                       .order_by(CalibrationRelease.id.desc())).all()
     return [{'id': entry.id, 'batch_code': run.batch_code, 'source_name': run.source_name,
-             'state': entry.state, 'prediction_pct': entry.prediction_pct, 'requested_by': entry.requested_by}
+             'state': entry.state, 'prediction_pct': entry.prediction_pct, 'requested_by': entry.requested_by,
+             'evidence': evidence.inspect_evidence(entry)}
             for entry, run in rows]
 
 
@@ -167,8 +170,18 @@ def detail(entry_id: int, db: Session = Depends(session)):
     batch, run, entry = calibration_context(db, entry_id)
     events = db.scalars(select(LabEvent).filter_by(batch_code=batch.code).order_by(LabEvent.id.desc()).limit(30))
     return {'batch': ledger.row(batch), 'curve': ledger.row(run), 'entry': ledger.row(entry),
+            'evidence': evidence.inspect_evidence(entry),
             'retest': [ledger.row(sample) for sample in ledger.samples_for(db, run.id, retest=True)],
             'events': [ledger.row(event) for event in events]}
+
+
+@router.post('/calibrations/{entry_id}/evidence/backfill')
+def backfill(entry_id: int, db: Session = Depends(session), user=Depends(supervisor)):
+    """主管补齐拟合证据：仅按原输入与已落定结论重建文件，不重新拟合，不改变签发结论。"""
+    if db.get(CalibrationRelease, entry_id) is None:
+        raise HTTPException(404, '没有找到该校准单')
+    verification = evidence.backfill_evidence(entry_id, user.username)
+    return {'id': entry_id, 'evidence': verification}
 
 
 @router.post('/calibrations/{entry_id}/retry', status_code=202)

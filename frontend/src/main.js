@@ -126,6 +126,11 @@ const commands = {
     await draw();
     toast('已重新排队');
   },
+  backfillEvidence: async () => {
+    await api.backfillEvidence(store.calibration.entry.id);
+    await draw();
+    toast('已按原输入与已落定结论补齐证据，未重新拟合');
+  },
   retest: async data => {
     await api.retest(store.calibration.entry.id, data);
     await draw();

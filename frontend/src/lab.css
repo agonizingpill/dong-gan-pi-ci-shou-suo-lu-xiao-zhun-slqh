@@ -55,6 +55,11 @@ h1, h2, h3, p, dl, ol { margin: 0; }
 .badge[data-state="frozen"], .badge[data-state="released"], .badge[data-state="verified"] { background: var(--teal-wash); border-color: oklch(87% .052 173); color: var(--teal); }
 .badge[data-state="draft"], .badge[data-state="held"], .badge[data-state="retest_required"], .badge[data-state="failed"] { background: var(--amber-wash); border-color: oklch(89% .055 82); color: var(--amber); }
 .badge[data-state="reference"] { background: var(--ground); border-color: var(--line); color: var(--muted); }
+.evidence-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: .73rem; font-weight: 650; line-height: 1.2; white-space: nowrap; background: var(--teal-wash); border: 1px solid oklch(87% .052 173); color: var(--teal); }
+.evidence-badge i { background: currentColor; border-radius: 50%; width: 6px; height: 6px; display: inline-block; flex: none; }
+.evidence-badge[data-evidence="pending_verification"] { background: var(--amber-wash); border-color: oklch(89% .055 82); color: var(--amber); }
+.evidence-badge[data-evidence="unsettled"] { background: var(--ground); border-color: var(--line); color: var(--muted); }
+.summary-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .batch-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 10px; }
 .batch-heading h2 { font-size: clamp(1.65rem, 3vw, 2.5rem); line-height: 1.1; margin-top: 3px; letter-spacing: -.055em; }
 .specs { display: grid; grid-template-columns: .8fr .65fr 1.2fr 1fr; border-block: 1px solid var(--line); margin: 10px 0 16px; }

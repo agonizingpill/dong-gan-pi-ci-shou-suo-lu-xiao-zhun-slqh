@@ -1,5 +1,5 @@
 import {store} from '../api.js';
-import {badge, measurementBand, pageTitle, sectionTitle, windowLabel} from '../components/ledger.js';
+import {badge, evidenceBadge, measurementBand, pageTitle, sectionTitle, windowLabel} from '../components/ledger.js';
 import {events, h, number, stages, when} from '../presentation.js';
 
 export function labPage() {
@@ -23,14 +23,14 @@ export function labPage() {
       <div class="padded"><strong class="algorithm">Yeo–Johnson<br><span>+ Ridge</span></strong>
       <ol class="method"><li>取同配方通过主管认证的参考批次。</li><li>从冻结曲线提取真空段时长、均压、均温，并结合配方及投料厚度。</li>
       <li>对有变化的特征变换及标准化，拟合 Ridge；逐批留一计算 RMSE。</li></ol></div></div>
-      ${entry?.result ? `<div class="fit-summary"><span>预测收缩率</span><strong class="mono">${number(entry.prediction_pct)}%</strong>${badge(entry.state)}</div>` : ''}</section></div>`;
+      ${entry?.result ? `<div class="fit-summary"><span>预测收缩率</span><strong class="mono">${store.batch?.evidence?.status === 'pending_verification' ? '待核' : `${number(entry.prediction_pct)}%`}</strong><span class="summary-badges">${badge(entry.state)}${evidenceBadge(store.batch?.evidence)}</span></div>` : ''}</section></div>`;
 }
 
 function registerTable() {
   if (!store.register.length) return '<p class="empty">提交首个符合条件的批次后，可在此跟踪复测与签发。</p>';
-  return `<table><thead><tr><th>冻干批次</th><th>校准状态</th><th>预测收缩率</th><th>冻结曲线</th></tr></thead><tbody>
+  return `<table><thead><tr><th>冻干批次</th><th>校准状态</th><th>证据核验</th><th>预测收缩率</th><th>冻结曲线</th></tr></thead><tbody>
     ${store.register.map(entry => `<tr><th><a class="mono" href="#release/${entry.id}">${h(entry.batch_code)} / ${String(entry.id).padStart(3, '0')}</a></th>
-    <td>${badge(entry.state)}</td><td class="mono">${entry.prediction_pct == null ? '—' : `${number(entry.prediction_pct)}%`}</td><td class="mono">${h(entry.source_name)}</td></tr>`).join('')}</tbody></table>`;
+    <td>${badge(entry.state)}</td><td>${evidenceBadge(entry.evidence)}</td><td class="mono">${entry.evidence?.status === 'pending_verification' ? '待核' : entry.prediction_pct == null ? '—' : `${number(entry.prediction_pct)}%`}</td><td class="mono">${h(entry.source_name)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function workflow(data) {
@@ -72,15 +72,19 @@ export function releasePage() {
   return `${pageTitle('放行详情', `${batch.code} / ${curve.source_name}`, '<a class="text-link" href="#release">← 放行台账</a>')}
     <div class="release-grid"><div>
       <section class="sheet result-panel">${sectionTitle(`校准单 #${String(entry.id).padStart(3, '0')}`, entry.snapshot.recipe)}<div class="padded">
-      <div class="results"><div><span>预测收缩率</span><strong class="mono">${entry.prediction_pct == null ? '—' : `${number(entry.prediction_pct)}%`}</strong></div>
-      <div><span>实测复核</span><strong class="mono">${entry.recheck_pct == null ? '—' : `${number(entry.recheck_pct)}%`}</strong></div>${badge(entry.state)}</div>
-      ${measurementBand(entry.snapshot.window, entry.prediction_pct, entry.recheck_pct)}
+      <div class="results"><div><span>预测收缩率</span><strong class="mono">${data.evidence?.status === 'pending_verification' ? '待核' : entry.prediction_pct == null ? '—' : `${number(entry.prediction_pct)}%`}</strong></div>
+      <div><span>实测复核</span><strong class="mono">${data.evidence?.status === 'pending_verification' ? '待核' : entry.recheck_pct == null ? '—' : `${number(entry.recheck_pct)}%`}</strong></div><span class="summary-badges">${badge(entry.state)}${evidenceBadge(data.evidence)}</span></div>
+      ${data.evidence?.status === 'pending_verification' ? '' : measurementBand(entry.snapshot.window, entry.prediction_pct, entry.recheck_pct)}
       <div class="fit-metrics"><span><i class="dot prediction"></i>预测</span><span><i class="dot recheck"></i>复测</span><span><i class="dot window"></i>工艺窗</span></div></div></section>
-      <section class="sheet evidence">${sectionTitle('拟合证据', `${entry.snapshot.training.length} 个参考批次`)}<div class="padded">
+      <section class="sheet evidence">${sectionTitle('拟合证据', `${entry.snapshot.training.length} 个参考批次 · ${evidenceBadge(data.evidence)}`)}<div class="padded">
+      ${data.evidence?.status === 'pending_verification' ? `<p class="callout warning">证据待核：${h(data.evidence.reason || '证据文件与台账不一致')}。校准结论暂不显示为可用，需主管按原输入与已落定结论补齐证据，补证据不会重新拟合。</p>` : ''}
+      ${data.evidence?.status === 'available' ? '<p class="callout">证据文件、输入指纹与台账结论核验一致，可作为放行依据。</p>' : ''}
       <dl class="evidence-grid"><div><dt>模型</dt><dd>Yeo–Johnson / Ridge</dd></div><div><dt>逐批留一 RMSE</dt><dd class="mono">${number(entry.result?.loo_rmse, 3)} pp</dd></div>
       <div><dt>Ridge α / 求解器</dt><dd class="mono">${number(entry.result?.alpha, 2)} / ${h(entry.result?.solver || '—')}</dd></div><div><dt>复现种子</dt><dd class="mono">${h(entry.result?.seed || '—')}</dd></div></dl>
       <details class="entry-form evidence-details"><summary>参考批次与快照指纹</summary><ul>${entry.snapshot.training.map(reference => `<li><span class="mono">${h(reference.batch)}</span> <span>${number(reference.observed)}%</span></li>`).join('')}</ul>
-      <p class="hash mono">${h(entry.input_hash)}</p></details></div></section>
+      <p class="hash mono">${h(entry.input_hash)}</p></details>
+      ${data.evidence?.status === 'pending_verification' && store.user.role === 'supervisor'
+        ? '<button class="primary" data-action="backfillEvidence">按原输入与结论补证据</button>' : ''}</div></section>
     </div><div>${workflow(data)}<section class="sheet history">${sectionTitle('批次审计记录')}
       <ol>${data.events.map(event => `<li><b>${h(events[event.action] || (event.action.endsWith('.blocked') ? '操作拒绝' : event.action))}</b><time>${when(event.happened_at)}</time>
       <p>${h(event.actor)} · ${h(event.detail)}</p></li>`).join('')}</ol></section></div></div>`;
